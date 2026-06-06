@@ -185,6 +185,7 @@ protected:
 	void paintEvent( QPaintEvent * pe ) override;
 	void resizeEvent( QResizeEvent * re ) override;
 	void wheelEvent( QWheelEvent * we ) override;
+	bool event( QEvent * e ) override;
 	void focusOutEvent( QFocusEvent * ) override;
 	void focusInEvent( QFocusEvent * ) override;
 
@@ -219,6 +220,7 @@ protected slots:
 	void copySelectedNotes();
 	void cutSelectedNotes();
 	void pasteNotes();
+	void duplicateSelectedNotes();
 	bool deleteSelectedNotes();
 
 	void updatePosition();
@@ -446,6 +448,7 @@ private:
 	TimePos m_minResizeLen;
 
 	int m_startKey; // first key when drawing
+	int m_startKeyPixelOffset = 0; // sub-key vertical scroll offset, for smooth scrolling
 	int m_lastKey;
 
 	EditMode m_editMode;

@@ -108,7 +108,7 @@ EffectSelectDialog::EffectSelectDialog(QWidget* parent) :
 
 	QVBoxLayout* leftSectionLayout = new QVBoxLayout();
 
-	QStringList buttonLabels = { tr("All"), "LMMS", "LADSPA", "LV2", "VST" };
+	QStringList buttonLabels = { tr("All"), "TEZ Studio", "LADSPA", "LV2", "VST" };
 	QStringList buttonSearchString = { "", "LMMS", "LADSPA", "LV2", "VST" };
 
 	for (int i = 0; i < buttonLabels.size(); ++i)

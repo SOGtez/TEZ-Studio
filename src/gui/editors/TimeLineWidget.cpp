@@ -28,6 +28,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPolygon>
 #include <QTimer>
 #include <QToolBar>
 
@@ -212,6 +213,32 @@ void TimeLineWidget::paintEvent( QPaintEvent * )
 
 	const QPixmap& marker = !m_isRecording ? m_posMarkerPixmap : m_recordingPosMarkerPixmap;
 
+	// Stationary "start" marker: a dark triangle marking where playback will restart
+	// (the position the playhead was last moved to). Drawn under the live playhead.
+	const auto startPos = m_timeline->playStartPosition();
+	if (startPos >= 0)
+	{
+		const int sx = markerX(startPos);
+		if (sx >= m_xOffset && sx < width() - marker.width() / 2)
+		{
+			const int w = marker.width();
+			const int h = marker.height();
+			const int top = height() - h;
+			const QPoint tri[3] = {
+				QPoint(sx - w / 2, top),
+				QPoint(sx + w / 2, top),
+				QPoint(sx, top + h)
+			};
+			p.save();
+			p.setClipping(false);
+			p.setOpacity(1.0);
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(0, 0, 0, 190));
+			p.drawConvexPolygon(tri, 3);
+			p.restore();
+		}
+	}
+
 	// Only draw the position marker if the position line is in view
 	if (m_isPlayheadVisible && markerX(m_timeline->pos()) >= m_xOffset && markerX(m_timeline->pos()) < width() - marker.width() / 2)
 	{
@@ -332,6 +359,9 @@ void TimeLineWidget::mouseMoveEvent( QMouseEvent* event )
 	{
 		case Action::MovePositionMarker:
 			m_timeline->setTicks(timeAtCursor.getTicks());
+			// Moving the playhead also sets the persistent start position, so that
+			// stopping (BackToStart) and replaying restarts from here every time.
+			m_timeline->setPlayStartPosition(timeAtCursor);
 			if (!( Engine::getSong()->isPlaying()))
 			{
 				//Song::PlayMode::None is used when nothing is being played.

@@ -82,6 +82,7 @@ public:
 
 private slots:
 	void reloadTree();
+	void addSearchDirectory();
 	void expandItems(const QList<QString>& expandedDirs, QTreeWidgetItem* item = nullptr);
 	void giveFocusToFilter();
 

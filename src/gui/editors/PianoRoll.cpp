@@ -29,6 +29,7 @@
 #include <QtMath>  // IWYU pragma: keep
 #include <QApplication>
 #include <QCheckBox>
+#include <QCursor>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -895,6 +896,7 @@ void PianoRoll::setCurrentMidiClip( MidiClip* newMidiClip )
 	{
 		central_key = central_key / total_notes - (NumKeys - m_totalKeysToScroll) / 2;
 		m_startKey = qBound(0, central_key, NumKeys);
+		m_startKeyPixelOffset = 0;
 	}
 
 	// Make sure the playhead position isn't out of the clip bounds.
@@ -1365,9 +1367,9 @@ void PianoRoll::keyPressEvent(QKeyEvent* ke)
 				}
 				else
 				{
-					// scroll
+					// scroll (one key per step; scrollbar is in pixels)
 					m_topBottomScroll->setValue( m_topBottomScroll->value() -
-						cm_scrollAmtVert * direction );
+						cm_scrollAmtVert * direction * m_keyLineHeight );
 
 					// if they are moving notes around or resizing,
 					// recalculate the note/resize position
@@ -1962,6 +1964,15 @@ void PianoRoll::mousePressEvent(QMouseEvent * me )
 
 					// otherwise move it
 					m_action = Action::MoveNote;
+
+					// Clicking (not resizing) an existing note makes the next drawn
+					// note inherit its length (FL "copy note" behaviour). Resizing goes
+					// through the ResizeNote branch above, so the chosen note-length
+					// picker is left untouched there.
+					if (!is_new_note)
+					{
+						m_noteLenModel.setValue(0);
+					}
 
 					// set move-cursor
 					setCursor( Qt::SizeAllCursor );
@@ -2937,7 +2948,7 @@ void PianoRoll::updateKnifePos(QMouseEvent* me, bool initial)
 
 	// Calculate the TimePos from the mouse
 	int mouseViewportPosX = pos.x() - m_whiteKeyWidth;
-	int mouseViewportPosY = keyAreaBottom() - 1 - pos.y();
+	int mouseViewportPosY = keyAreaBottom() - 1 - pos.y() - m_startKeyPixelOffset;
 	int mouseTickPos = mouseViewportPosX * TimePos::ticksPerBar() / m_ppb + m_currentPosition;
 	int mouseKey = std::round(1.f * mouseViewportPosY / m_keyLineHeight) + m_startKey - 1;
 
@@ -3430,8 +3441,8 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 
 		// draw horizontal grid lines and piano notes
 		p.setClipRect(0, keyAreaTop(), width(), keyAreaBottom() - keyAreaTop());
-		// the first grid line from the top Y position
-		int grid_line_y = keyAreaTop() + m_keyLineHeight - 1;
+		// the first grid line from the top Y position (shifted up for smooth scroll)
+		int grid_line_y = keyAreaTop() + m_keyLineHeight - 1 - m_startKeyPixelOffset;
 
 		// lambda function for returning the height of a key
 		auto keyHeight = [&](
@@ -3489,6 +3500,7 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 			const int key,
 			const int yb)
 		{
+			if (key < 0 || key >= NumKeys) { return; }
 			const bool mapped = m_midiClip->instrumentTrack()->isKeyMapped(key);
 			const bool pressed = m_midiClip->instrumentTrack()->pianoModel()->isKeyPressed(key);
 			const int keyCode = key % KeysPerOctave;
@@ -3564,8 +3576,10 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 			// draw extra white key
 			drawKey(topKey + 1, grid_line_y - m_keyLineHeight);
 		}
-		// loop through visible keys
-		const int lastKey = qMax(0, topKey - m_pianoKeysVisible);
+		// loop through visible keys. Draw one extra key past the bottom so the
+		// partial key revealed by smooth scrolling is filled in (drawKey/lines guard
+		// against out-of-range indices).
+		const int lastKey = qMax(-1, topKey - m_pianoKeysVisible - 1);
 		for (int key = topKey; key > lastKey; --key)
 		{
 			bool whiteKey = Piano::isWhiteKey(key);
@@ -3597,7 +3611,8 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 		float timeSignature =
 			static_cast<float>(Engine::getSong()->getTimeSigModel().getNumerator()) /
 			static_cast<float>(Engine::getSong()->getTimeSigModel().getDenominator());
-		float zoomFactor = m_zoomLevels[m_zoomingModel.value()];
+		// Derive from m_ppb so continuous (pinch) zoom stays consistent with the grid.
+		float zoomFactor = static_cast<float>(m_ppb) / DEFAULT_PR_PPB;
 		//the bars which disappears at the left side by scrolling
 		int leftBars = m_currentPosition * zoomFactor / TimePos::ticksPerBar();
 		//iterates the visible bars and draw the shading on uneven bars
@@ -3694,7 +3709,7 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 		qSwap<int>( sel_key_start, sel_key_end );
 	}
 
-	int y_base = keyAreaBottom() - 1;
+	int y_base = keyAreaBottom() - 1 - m_startKeyPixelOffset;
 	if( hasValidMidiClip() )
 	{
 		p.setClipRect(
@@ -3711,7 +3726,7 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 		// Return a note's Y position on the grid
 		auto noteYPos = [&](const int key)
 		{
-			return (topKey - key) * m_keyLineHeight + keyAreaTop() - 1;
+			return (topKey - key) * m_keyLineHeight + keyAreaTop() - 1 - m_startKeyPixelOffset;
 		};
 
 		// -- Begin ghost MIDI clip
@@ -4035,12 +4050,17 @@ void PianoRoll::updateScrollbars()
 	int pianoAreaHeight = keyAreaBottom() - PR_TOP_MARGIN;
 	int numKeysVisible = pianoAreaHeight / m_keyLineHeight;
 	m_totalKeysToScroll = qMax(0, NumKeys - numKeysVisible);
-	m_topBottomScroll->setRange(0, m_totalKeysToScroll);
+	// Pixel-based vertical scrollbar (smooth scrolling).
+	m_topBottomScroll->setRange(0, m_totalKeysToScroll * m_keyLineHeight);
+	m_topBottomScroll->setSingleStep(qMax(1, m_keyLineHeight / 4));
+	m_topBottomScroll->setPageStep(pianoAreaHeight);
 	if (m_startKey > m_totalKeysToScroll)
 	{
 		m_startKey = qMax(0, m_totalKeysToScroll);
+		m_startKeyPixelOffset = 0;
 	}
-	m_topBottomScroll->setValue(m_totalKeysToScroll - m_startKey);
+	m_startKeyPixelOffset = qBound(0, m_startKeyPixelOffset, qMax(0, m_keyLineHeight - 1));
+	m_topBottomScroll->setValue((m_totalKeysToScroll - m_startKey) * m_keyLineHeight + m_startKeyPixelOffset);
 }
 
 // responsible for moving/resizing scrollbars after window-resizing
@@ -4056,7 +4076,7 @@ void PianoRoll::resizeEvent(QResizeEvent* re)
 void PianoRoll::adjustLeftRightScoll(int value)
 {
 	m_leftRightScroll->setValue(m_leftRightScroll->value() -
-							value * 0.3f / m_zoomLevels[m_zoomingModel.value()]);
+							value * 0.3f / (static_cast<float>(m_ppb) / DEFAULT_PR_PPB));
 }
 
 
@@ -4207,6 +4227,14 @@ void PianoRoll::wheelEvent(QWheelEvent * we )
 		m_zoomingModel.setValue( z );
 	}
 
+	// Trackpads provide pixel-precise deltas: scroll horizontally by exact pixels
+	// (converted to ticks) for smooth, non-jumpy motion.
+	else if (we->pixelDelta().x() != 0
+			&& std::abs(we->pixelDelta().x()) >= std::abs(we->pixelDelta().y()))
+	{
+		const int dTicks = we->pixelDelta().x() * TimePos::ticksPerBar() / m_ppb;
+		m_leftRightScroll->setValue(m_leftRightScroll->value() - dTicks);
+	}
 	// FIXME: Reconsider if determining orientation is necessary in Qt6.
 	else if (std::abs(we->angleDelta().x()) > std::abs(we->angleDelta().y())) // scrolling is horizontal
 	{
@@ -4218,9 +4246,56 @@ void PianoRoll::wheelEvent(QWheelEvent * we )
 	}
 	else
 	{
-		m_topBottomScroll->setValue(m_topBottomScroll->value() -
-							we->angleDelta().y() / 30);
+		// The scrollbar is in pixels: pixelDelta gives 1:1 smooth trackpad scrolling.
+		const int py = we->pixelDelta().y();
+		if (py != 0)
+		{
+			m_topBottomScroll->setValue(m_topBottomScroll->value() - py);
+		}
+		else
+		{
+			m_topBottomScroll->setValue(m_topBottomScroll->value() -
+								we->angleDelta().y() * m_keyLineHeight / 30);
+		}
 	}
+}
+
+
+
+
+bool PianoRoll::event(QEvent* e)
+{
+	if (e->type() == QEvent::NativeGesture)
+	{
+		auto* ng = static_cast<QNativeGestureEvent*>(e);
+		if (ng->gestureType() == Qt::ZoomNativeGesture)
+		{
+			// Trackpad pinch -> smooth, continuous horizontal (time) zoom, centred on
+			// the cursor. Scales m_ppb directly instead of snapping to discrete levels.
+			const int minPPB = qRound(m_zoomLevels.front() * DEFAULT_PR_PPB);
+			const int maxPPB = qRound(m_zoomLevels.back() * DEFAULT_PR_PPB);
+			const int oldPPB = m_ppb;
+			const int newPPB = qBound(minPPB, qRound(oldPPB * (1.0 + ng->value())), maxPPB);
+			if (newPPB != oldPPB && oldPPB > 0)
+			{
+				// Use the real cursor position so the zoom centres wherever the cursor
+				// hovers (the native gesture's own position is unreliable on macOS).
+				const int cursorX = mapFromGlobal(QCursor::pos()).x();
+				const int x = (cursorX - m_whiteKeyWidth) * TimePos::ticksPerBar();
+				const int ticks = x / oldPPB;
+				const int newTicks = x / newPPB;
+				m_ppb = newPPB;
+				m_timeLine->setPixelsPerBar(m_ppb);
+				m_stepRecorderWidget.setPixelsPerBar(m_ppb);
+				m_positionLine->zoomChange(static_cast<float>(m_ppb) / DEFAULT_PR_PPB);
+				updatePositionLinePos();
+				m_leftRightScroll->setValue(m_leftRightScroll->value() + ticks - newTicks);
+				update();
+			}
+			return true;
+		}
+	}
+	return QWidget::event(e);
 }
 
 
@@ -4269,7 +4344,7 @@ int PianoRoll::getKey(const int y) const
 	// Since keys are numbered from the bottom up, we must get the cursor's
 	// distance from the bottom of the editor, as if the bottom pixel was number 0.
 	// keyAreaBottom() is the first row BELOW the editor, therefore we subtract 1.
-	const int distanceFromBottom = keyAreaBottom() - 1 - y;
+	const int distanceFromBottom = keyAreaBottom() - 1 - y - m_startKeyPixelOffset;
 	// As we divide the distance by keyLineHeight, we want to floor() the result,
 	// which is exactly what integer division does, but only for POSITIVE numbers.
 	// Therefore we calculate the distance from absolute 0 (to ensure it is positive)
@@ -4284,8 +4359,9 @@ int PianoRoll::yCoordOfKey(const int key) const
 {
 	// m_startKey is the bottomost visible key and keyAreaBottom() is the first pixel BELOW the editor.
 	// Count number of keys from bottom, multiply by key height, and add one key height
-	// since we want to return the TOP pixel of given key
-	return keyAreaBottom() - ((key - m_startKey + 1) * m_keyLineHeight);
+	// since we want to return the TOP pixel of given key.
+	// m_startKeyPixelOffset shifts everything up by the sub-key smooth-scroll amount.
+	return keyAreaBottom() - ((key - m_startKey + 1) * m_keyLineHeight) - m_startKeyPixelOffset;
 }
 
 
@@ -4525,8 +4601,12 @@ void PianoRoll::horScrolled(int new_pos )
 
 void PianoRoll::verScrolled( int new_pos )
 {
-	// revert value
-	m_startKey = qMax(0, m_totalKeysToScroll - new_pos);
+	// The scrollbar value is in pixels; split it into a whole-key index plus a
+	// sub-key pixel offset so the view can scroll smoothly between semitones.
+	const int klh = qMax(1, m_keyLineHeight);
+	const int s = qBound(0, new_pos, m_totalKeysToScroll * klh);
+	m_startKey = qBound(0, m_totalKeysToScroll - s / klh, m_totalKeysToScroll);
+	m_startKeyPixelOffset = s % klh;
 
 	update();
 }
@@ -4686,13 +4766,19 @@ void PianoRoll::updateYScroll()
 	const int visible_space = keyAreaBottom() - keyAreaTop();
 	m_totalKeysToScroll = qMax(0, NumKeys - 1 - visible_space / m_keyLineHeight);
 
-	m_topBottomScroll->setRange(0, m_totalKeysToScroll);
+	// The vertical scrollbar is measured in PIXELS (not keys) so that scrolling is
+	// smooth instead of snapping one semitone at a time.
+	m_topBottomScroll->setRange(0, m_totalKeysToScroll * m_keyLineHeight);
+	m_topBottomScroll->setSingleStep(qMax(1, m_keyLineHeight / 4));
+	m_topBottomScroll->setPageStep(visible_space);
 
 	if(m_startKey > m_totalKeysToScroll)
 	{
 		m_startKey = m_totalKeysToScroll;
+		m_startKeyPixelOffset = 0;
 	}
-	m_topBottomScroll->setValue(m_totalKeysToScroll - m_startKey);
+	m_startKeyPixelOffset = qBound(0, m_startKeyPixelOffset, qMax(0, m_keyLineHeight - 1));
+	m_topBottomScroll->setValue((m_totalKeysToScroll - m_startKey) * m_keyLineHeight + m_startKeyPixelOffset);
 }
 
 
@@ -4810,6 +4896,54 @@ void PianoRoll::pasteNotes()
 		update();
 		getGUI()->songEditor()->update();
 	}
+}
+
+
+
+
+void PianoRoll::duplicateSelectedNotes()
+{
+	if (!hasValidMidiClip()) { return; }
+
+	NoteVector selectedNotes = getSelectedNotes();
+	if (selectedNotes.empty()) { return; }
+
+	// Span of the selection (earliest start to latest end). The copies are placed
+	// right after it, like FL Studio's Ctrl+B / Cmd+B.
+	int minPos = selectedNotes.front()->pos().getTicks();
+	int maxEnd = selectedNotes.front()->endPos().getTicks();
+	for (const Note* note : selectedNotes)
+	{
+		minPos = qMin(minPos, note->pos().getTicks());
+		maxEnd = qMax(maxEnd, note->endPos().getTicks());
+	}
+	const int offset = maxEnd - minPos;
+	if (offset <= 0) { return; }
+
+	m_midiClip->addJournalCheckPoint();
+
+	// Snapshot the copies by value first: addNote() may reallocate the clip's note
+	// storage, which would invalidate the Note* pointers we are iterating. Deselect
+	// the originals and select the copies so repeated Ctrl+B chains forward.
+	std::vector<Note> toAdd;
+	toAdd.reserve(selectedNotes.size());
+	for (Note* note : selectedNotes)
+	{
+		note->setSelected(false);
+		Note copy(*note);
+		copy.setPos(note->pos() + offset);
+		copy.setSelected(true);
+		toAdd.push_back(copy);
+	}
+	for (const Note& n : toAdd)
+	{
+		m_midiClip->addNote(n, false);
+	}
+
+	m_midiClip->rearrangeAllNotes();
+	Engine::getSong()->setModified();
+	update();
+	getGUI()->songEditor()->update();
 }
 
 
@@ -5269,6 +5403,12 @@ PianoRollWindow::PianoRollWindow() :
 	copyPasteActionsToolBar->addAction( copyAction );
 	copyPasteActionsToolBar->addAction( pasteAction );
 
+	auto duplicateAction = new QAction(embed::getIconPixmap("edit_copy"),
+		tr("Duplicate (%1+B)").arg(UI_CTRL_KEY), this);
+	duplicateAction->setShortcut(keySequence(Qt::CTRL, Qt::Key_B));
+	connect(duplicateAction, SIGNAL(triggered()), m_editor, SLOT(duplicateSelectedNotes()));
+	copyPasteActionsToolBar->addAction(duplicateAction);
+
 
 	DropToolBar *timeLineToolBar = addDropToolBarToTop( tr( "Timeline controls" ) );
 	m_editor->m_timeLine->addToolButtons( timeLineToolBar );
@@ -5647,7 +5787,9 @@ void PianoRollWindow::loadSettings( const QDomElement & de )
 	MainWindow::restoreWidgetState( this, de );
 
 	Engine::getSong()->getTimeline(Song::PlayMode::MidiClip).setStopBehaviour(
-		static_cast<Timeline::StopBehaviour>(de.attribute("stopbehaviour").toInt()));
+		// Default to BackToStart ("1") like the Song timeline, so a moved playhead /
+		// start marker is honoured on replay instead of jumping back to the beginning.
+		static_cast<Timeline::StopBehaviour>(de.attribute("stopbehaviour", "1").toInt()));
 
 	m_editor->m_keyModel.setInitValue(de.attribute("key").toInt());
 	m_editor->m_chordModel.setInitValue(de.attribute("chord").toInt());

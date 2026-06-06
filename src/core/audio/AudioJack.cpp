@@ -139,7 +139,7 @@ void AudioJack::restartAfterZombified()
 		m_active = false;
 		startProcessing();
 		QMessageBox::information(gui::getGUI()->mainWindow(), tr("JACK client restarted"),
-			tr(	"LMMS was kicked by JACK for some reason. "
+			tr(	"TEZ Studio was kicked by JACK for some reason. "
 				"Therefore the JACK backend of LMMS has been "
 				"restarted. You will have to make manual "
 				"connections again."));

@@ -490,7 +490,7 @@ void MainWindow::finalize()
 		ConfigManager::inst()->value( "audioengine", "audiodev" ) ) )
 	{
 		QMessageBox::critical(nullptr, "Audio device setup failed",
-			tr("Failed to setup audio device for playback. Try adjusting your audio device settings (e.g. the sample rate), then restart LMMS."));
+			tr("Failed to setup audio device for playback. Try adjusting your audio device settings (e.g. the sample rate), then restart TEZ Studio."));
 
 		// if so, offer the audio settings section of the setup dialog
 		SetupDialog sd( SetupDialog::ConfigTab::AudioSettings );
@@ -598,7 +598,7 @@ void MainWindow::resetWindowTitle()
 		title += " - " + tr( "Recover session. Please save your work!" );
 	}
 
-	setWindowTitle( title + " - " + tr( "LMMS %1" ).arg( LMMS_VERSION ) );
+	setWindowTitle( title + " - " + tr( "TEZ Studio %1" ).arg( LMMS_VERSION ) );
 }
 
 
@@ -812,8 +812,8 @@ bool MainWindow::saveProjectAs()
 	auto optionsWidget = new SaveOptionsWidget(Engine::getSong()->getSaveOptions());
 	VersionedSaveDialog sfd( this, optionsWidget, tr( "Save Project" ), "",
 			tr( "TEZ Studio Project" ) + " (*.tez);;" +
-				tr( "LMMS Project" ) + " (*.mmpz *.mmp);;" +
-				tr( "LMMS Project Template" ) + " (*.mpt)" );
+				tr( "TEZ Studio Project (legacy)" ) + " (*.mmpz *.mmp);;" +
+				tr( "TEZ Studio Template" ) + " (*.mpt)" );
 	QString f = Engine::getSong()->projectFileName();
 	if( f != "" )
 	{

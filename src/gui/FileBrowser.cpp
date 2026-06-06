@@ -28,6 +28,9 @@
 #include <PathUtil.h>
 #include <QApplication>
 #include <QCheckBox>
+#include <QFile>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLineEdit>
@@ -112,12 +115,23 @@ FileBrowser::FileBrowser(Type type, const QString& directories, const QString& f
 	connect(&m_searchJob, &FileSearchJob::finished, this, &FileBrowser::onSearchFinished, Qt::QueuedConnection);
 	connect(&m_searchJob, &FileSearchJob::foundMatch, this, &FileBrowser::onSearchMatch, Qt::QueuedConnection);
 
+	// "+" button: pick a folder (e.g. a drum/sound kit) and add it to this browser.
+	// Only offered on browsers backed by a user directory (e.g. My Kits, My Samples).
+	QPushButton* add_btn = nullptr;
+	if (!m_userDir.isEmpty())
+	{
+		add_btn = new QPushButton(embed::getIconPixmap("add_folder"), QString(), searchWidget);
+		add_btn->setToolTip(tr("Add a folder (e.g. a drum kit)"));
+		connect(add_btn, SIGNAL(clicked()), this, SLOT(addSearchDirectory()));
+	}
+
 	auto reload_btn = new QPushButton(embed::getIconPixmap("reload"), QString(), searchWidget);
 	reload_btn->setToolTip( tr( "Refresh list" ) );
 	connect( reload_btn, SIGNAL(clicked()), this, SLOT(reloadTree()));
 
 	searchWidgetLayout->addWidget( m_filterEdit );
 	searchWidgetLayout->addSpacing( 5 );
+	if (add_btn) { searchWidgetLayout->addWidget( add_btn ); }
 	searchWidgetLayout->addWidget( reload_btn );
 
 	addContentWidget( searchWidget );
@@ -149,6 +163,42 @@ FileBrowser::FileBrowser(Type type, const QString& directories, const QString& f
 
 	reloadTree();
 	show();
+}
+
+void FileBrowser::addSearchDirectory()
+{
+	const QString dir = QFileDialog::getExistingDirectory(this,
+		tr("Add a folder"), QDir::homePath(),
+		QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+	if (dir.isEmpty()) { return; }
+
+	// Link the chosen folder into this browser's user directory so it shows up here
+	// and persists across restarts (the user directory is rescanned each launch).
+	QDir userDir(m_userDir);
+	userDir.mkpath(".");
+
+	QString name = QFileInfo(dir).fileName();
+	if (name.isEmpty()) { name = QStringLiteral("kit"); }
+
+	QString linkPath = userDir.filePath(name);
+	for (int n = 2; QFileInfo::exists(linkPath); ++n)
+	{
+		linkPath = userDir.filePath(QStringLiteral("%1 (%2)").arg(name).arg(n));
+	}
+
+	if (QFile::link(dir, linkPath))
+	{
+		reloadTree();
+	}
+	else
+	{
+		// Could not create a link (e.g. permissions): add it for this session only.
+		m_directories = dir + "*" + m_directories;
+		reloadTree();
+		QMessageBox::information(this, tr("Add a folder"),
+			tr("Added \"%1\" for this session, but it could not be linked into the "
+			   "browser folder, so it won't persist after a restart.").arg(dir));
+	}
 }
 
 void FileBrowser::addContentCheckBox()

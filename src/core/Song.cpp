@@ -676,7 +676,8 @@ void Song::stop()
 			{
 				timeline.setTicks(timeline.playStartPosition().getTicks());
 
-				timeline.setPlayStartPosition(-1);
+				// Keep the start position so that stopping and replaying restarts
+				// from the same spot every time (until the playhead is moved again).
 			}
 			break;
 
@@ -1197,7 +1198,7 @@ void Song::loadProject( const QString & fileName )
 	{
 		if ( getGUI() != nullptr )
 		{
-			QMessageBox::warning( nullptr, tr("LMMS Error report"), errorSummary(),
+			QMessageBox::warning( nullptr, tr("TEZ Studio Error report"), errorSummary(),
 							QMessageBox::Ok );
 		}
 		else
