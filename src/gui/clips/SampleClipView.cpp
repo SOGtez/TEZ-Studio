@@ -24,6 +24,7 @@
  
 #include "SampleClipView.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QMenu>
 #include <QPainter>
@@ -37,6 +38,7 @@
 #include "SampleThumbnail.h"
 #include "Song.h"
 #include "StringPairDrag.h"
+#include "TimeStretch.h"
 #include "TrackContainerView.h"
 #include "TrackView.h"
 
@@ -83,9 +85,12 @@ void SampleClipView::constructContextMenu(QMenu* cm)
 {
 	cm->addSeparator();
 
-	/*contextMenu.addAction( embed::getIconPixmap( "record" ),
-				tr( "Set/clear record" ),
-						m_clip, SLOT(toggleRecord()));*/
+	cm->addAction(
+		embed::getIconPixmap("record"),
+		tr("Set/clear record"),
+		m_clip,
+		SLOT(toggleRecord())
+	);
 
 	cm->addAction(
 		embed::getIconPixmap("flip_x"),
@@ -100,6 +105,16 @@ void SampleClipView::constructContextMenu(QMenu* cm)
 		this,
 		SLOT(setAutomationGhost())
 	);
+
+	auto syncAction = cm->addAction(tr("Sync to tempo"));
+	syncAction->setCheckable(true);
+	syncAction->setChecked(m_clip->isSyncToTempo());
+	syncAction->setEnabled(timeStretchAvailable());
+	if (!timeStretchAvailable())
+	{
+		syncAction->setToolTip(tr("This build has no time-stretch support"));
+	}
+	connect(syncAction, &QAction::toggled, m_clip, &SampleClip::setSyncToTempo);
 
 }
 

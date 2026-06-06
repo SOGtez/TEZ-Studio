@@ -596,14 +596,16 @@ void InstrumentTrackWindow::dropEvent( QDropEvent* event )
 		const QString ext = FileItem::extension( value );
 		Instrument * i = m_track->instrument();
 
-		if( !i->descriptor()->supportsFileType( ext ) )
+		// The track may have no instrument yet (empty instrument track), so load a
+		// suitable plugin if there is none or it can't handle this preset's type.
+		if( i == nullptr || !i->descriptor()->supportsFileType( ext ) )
 		{
 			PluginFactory::PluginInfoAndKey piakn =
 				getPluginFactory()->pluginSupportingExtension(ext);
 			i = m_track->loadInstrument(piakn.info.name(), &piakn.key);
 		}
 
-		i->loadFile( value );
+		if( i != nullptr ) { i->loadFile( value ); }
 
 		event->accept();
 		setFocus();
@@ -720,6 +722,9 @@ void InstrumentTrackWindow::viewPrevInstrument()
 
 void InstrumentTrackWindow::adjustTabSize(QWidget *w)
 {
+	// An instrument track may have no instrument loaded yet, in which case the
+	// plugin view (m_instrumentView) is null. Skip resizing missing tab widgets.
+	if (w == nullptr) { return; }
 	// "-1" :
 	// in "TabWidget::addTab", under "Position tab's window", the widget is
 	// moved up by 1 pixel

@@ -66,6 +66,10 @@
 			"default-features": false
 		},
 		{
+			"name": "soundtouch",
+			"default-features": false
+		},
+		{
 			"name": "zlib",
 			"default-features": false
 		}

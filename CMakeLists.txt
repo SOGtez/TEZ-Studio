@@ -91,6 +91,7 @@ OPTION(WANT_SDL		"Include SDL (Simple DirectMedia Layer) support" ON)
 OPTION(WANT_SF2		"Include SoundFont2 player plugin" ON)
 OPTION(WANT_GIG		"Include GIG player plugin" ON)
 option(WANT_SID		"Include Sid instrument" ON)
+OPTION(WANT_SOUNDTOUCH	"Include SoundTouch time-stretch support" ON)
 OPTION(WANT_STK		"Include Stk (Synthesis Toolkit) support" ON)
 OPTION(WANT_SWH		"Include Steve Harris's LADSPA plugins" ON)
 OPTION(WANT_TAP		"Include Tom's Audio Processing LADSPA plugins" ON)
@@ -377,6 +378,17 @@ IF(WANT_STK)
 			"if you require the Mallets instrument")
 	ENDIF(STK_FOUND)
 ENDIF(WANT_STK)
+
+IF(WANT_SOUNDTOUCH)
+	FIND_PACKAGE(SoundTouch)
+	IF(SoundTouch_FOUND)
+		SET(LMMS_HAVE_SOUNDTOUCH TRUE)
+		SET(STATUS_SOUNDTOUCH "OK")
+	ELSE(SoundTouch_FOUND)
+		SET(STATUS_SOUNDTOUCH "not found, please install libsoundtouch-dev (or 'sound-touch' via brew)"
+			"if you require tempo-synced sample time-stretching")
+	ENDIF(SoundTouch_FOUND)
+ENDIF(WANT_SOUNDTOUCH)
 
 
 # check for PortAudio

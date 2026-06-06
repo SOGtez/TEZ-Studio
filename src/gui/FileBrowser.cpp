@@ -1323,7 +1323,7 @@ QString FileItem::extension(const QString & file )
 
 QString FileItem::defaultFilters()
 {
-	const auto projectFilters = QStringList{"*.mmp", "*.mpt", "*.mmpz"};
+	const auto projectFilters = QStringList{"*.tez", "*.mmp", "*.mpt", "*.mmpz"};
 	const auto presetFilters = QStringList{"*.xpf", "*.xml", "*.xiz", "*.lv2"};
 	const auto soundFontFilters = QStringList{"*.sf2", "*.sf3"};
 	const auto patchFilters = QStringList{"*.pat"};

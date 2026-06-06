@@ -202,7 +202,7 @@ bool DataFile::validate( QString extension )
 	switch( m_type )
 	{
 	case Type::SongProject:
-		if( extension == "mmp" || extension == "mmpz" )
+		if( extension == "tez" || extension == "mmp" || extension == "mmpz" )
 		{
 			return true;
 		}
@@ -226,7 +226,7 @@ bool DataFile::validate( QString extension )
 		}
 		break;
 	case Type::Unknown:
-		if (! ( extension == "mmp" || extension == "mpt" || extension == "mmpz" ||
+		if (! ( extension == "tez" || extension == "mmp" || extension == "mpt" || extension == "mmpz" ||
 				extension == "xpf" || extension == "xml" ||
 				( extension == "xiz" && ! getPluginFactory()->pluginSupportingExtension(extension).isNull()) ||
 				extension == "sf2" || extension == "sf3" || extension == "pat" || extension == "mid" ||
@@ -266,16 +266,14 @@ QString DataFile::nameWithExtension( const QString & _fn ) const
 	switch( type() )
 	{
 		case Type::SongProject:
-			if( extension != "mmp" &&
+			if( extension != "tez" &&
+					extension != "mmp" &&
 					extension != "mpt" &&
 					extension != "mmpz" )
 			{
-				if( ConfigManager::inst()->value( "app",
-						"nommpz" ).toInt() == 0 )
-				{
-					return _fn + ".mmpz";
-				}
-				return _fn + ".mmp";
+				// New TEZ Studio projects default to the .tez format.
+				// Existing .mmp/.mmpz files keep their extension on save.
+				return _fn + ".tez";
 			}
 			break;
 		case Type::SongProjectTemplate:
@@ -402,7 +400,7 @@ bool DataFile::writeFile(const QString& filename, bool withResources)
 	}
 
 	const QString extension = fullName.section('.', -1);
-	if (extension == "mmpz" || extension == "xptz")
+	if (extension == "tez" || extension == "mmpz" || extension == "xptz")
 	{
 		QString xml;
 		QTextStream ts( &xml );

@@ -34,9 +34,11 @@
 #include <QString>
 #include <QWidget>
 #include <portaudio.h>
+#include <vector>
 
 #include "AudioDevice.h"
 #include "AudioDeviceSetupWidget.h"
+#include "SampleFrame.h"
 
 namespace lmms {
 
@@ -87,6 +89,10 @@ private:
 
 	detail::PortAudioInitializationGuard m_initGuard;
 	PaStream* m_paStream = nullptr;
+
+	// Audio capture (microphone / line-in) state
+	int m_inputChannels = 0;
+	std::vector<SampleFrame> m_captureBuffer;
 };
 } // namespace lmms
 

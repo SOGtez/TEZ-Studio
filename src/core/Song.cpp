@@ -521,8 +521,10 @@ void Song::playSong()
 
 void Song::record()
 {
+	// Start playback in recording mode so that record-armed sample tracks
+	// capture incoming audio (microphone / line-in) from the audio device.
+	playSong();
 	m_recording = true;
-	// TODO: Implement
 }
 
 

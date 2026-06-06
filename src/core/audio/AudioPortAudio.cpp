@@ -167,6 +167,14 @@ AudioPortAudio::AudioPortAudio(bool& successful, AudioEngine* engine)
 		return;
 	}
 
+	// Enable audio capture (microphone / line-in) when an input device is configured.
+	if (inputDeviceIndex != paNoDevice && inputDeviceChannels > 0)
+	{
+		m_supportsCapture = true;
+		m_inputChannels = inputDeviceChannels;
+		m_captureBuffer.resize(framesPerBuffer);
+	}
+
 	successful = true;
 	setSampleRate(sampleRate);
 	setChannels(outputDeviceChannels);
@@ -188,7 +196,7 @@ void AudioPortAudio::stopProcessingImpl()
 	Pa_StopStream(m_paStream);
 }
 
-int AudioPortAudio::processCallback(const void*, void* output, unsigned long frameCount,
+int AudioPortAudio::processCallback(const void* input, void* output, unsigned long frameCount,
 	const PaStreamCallbackTimeInfo*, PaStreamCallbackFlags, void* userData)
 {
 	const auto device = static_cast<AudioPortAudio*>(userData);
@@ -202,6 +210,26 @@ int AudioPortAudio::processCallback(const void*, void* output, unsigned long fra
 	}
 
 	device->audioEngine()->renderNextBuffer({outputBuffer, channels, frameCount});
+
+	// Feed captured input (microphone / line-in) into the engine so it can be
+	// recorded onto sample tracks. Mono inputs are duplicated to both channels.
+	if (input != nullptr && device->m_inputChannels > 0)
+	{
+		const auto inputBuffer = reinterpret_cast<const float*>(input);
+		const auto inChannels = device->m_inputChannels;
+		auto& capture = device->m_captureBuffer;
+		if (capture.size() < frameCount) { capture.resize(frameCount); }
+
+		for (unsigned long frame = 0; frame < frameCount; ++frame)
+		{
+			const float left = inputBuffer[frame * inChannels];
+			const float right = inChannels > 1 ? inputBuffer[frame * inChannels + 1] : left;
+			capture[frame][0] = left;
+			capture[frame][1] = right;
+		}
+		device->audioEngine()->pushInputFrames(capture.data(), static_cast<f_cnt_t>(frameCount));
+	}
+
 	return paContinue;
 }
 } // namespace lmms

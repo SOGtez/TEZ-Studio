@@ -26,6 +26,7 @@
 #define LMMS_SAMPLE_CLIP_H
 
 #include <memory>
+#include <QTimer>
 #include "Clip.h"
 #include "Sample.h"
 
@@ -46,6 +47,7 @@ class SampleClip : public Clip
 {
 	Q_OBJECT
 	mapPropertyFromModel(bool,isRecord,setRecord,m_recordModel);
+	mapPropertyFromModel(bool,isSyncToTempo,setSyncToTempo,m_syncToTempoModel);
 public:
 	SampleClip(Track* track, Sample sample, bool isPlaying);
 	SampleClip(Track* track);
@@ -96,11 +98,31 @@ public slots:
 protected:
 	SampleClip( const SampleClip& orig );
 
+private slots:
+	// Re-derive the stretched buffer from the original for the current tempo.
+	void applyStretch();
+	// React to the "Sync to tempo" toggle being switched on/off.
+	void onSyncToggled();
+
 private:
+	// Connect tempo-sync signals/timer; called from both constructors.
+	void initTempoSync();
+	// Stretch factor (outFrames/inFrames) for the current tempo and target length.
+	double computeStretchRatio() const;
+	// Natural sample length rounded to whole bars (min one bar), in ticks.
+	int barAlignedTargetTicks() const;
+
 	Sample m_sample;
 	BoolModel m_recordModel;
+	BoolModel m_syncToTempoModel;
 	bool m_isPlaying;
 	int m_startFrameOffset;
+
+	// Tempo-synced time-stretch state
+	std::shared_ptr<const SampleBuffer> m_originalBuffer;
+	int m_targetLengthTicks = 0;
+	bpm_t m_lastStretchBpm = 0;
+	QTimer m_restretchTimer;
 
 	friend class gui::SampleClipView;
 

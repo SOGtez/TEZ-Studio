@@ -115,7 +115,7 @@ MainWindow::MainWindow() :
 		embed::getIconPixmap("star").transformed(QTransform().rotate(90)), splitter, false, "", ""));
 
 	sideBar->appendTab(new FileBrowser(FileBrowser::Type::Normal,
-		confMgr->userProjectsDir() + "*" + confMgr->factoryProjectsDir(), "*.mmp *.mmpz *.xml *.mid *.mpt",
+		confMgr->userProjectsDir() + "*" + confMgr->factoryProjectsDir(), "*.tez *.mmp *.mmpz *.xml *.mid *.mpt",
 		tr("My Projects"), embed::getIconPixmap("project_file").transformed(QTransform().rotate(90)), splitter, false,
 		confMgr->userProjectsDir(), confMgr->factoryProjectsDir()));
 
@@ -123,6 +123,15 @@ MainWindow::MainWindow() :
 		confMgr->userSamplesDir() + "*" + confMgr->factorySamplesDir(), FileItem::defaultFilters(), tr("My Samples"),
 		embed::getIconPixmap("sample_file").transformed(QTransform().rotate(90)), splitter, false,
 		confMgr->userSamplesDir(), confMgr->factorySamplesDir()));
+
+	// "My Kits": a dedicated browser that shows ONLY the user's own drum/sound kits.
+	// Drop kit folders into this directory and they appear here, uncluttered by
+	// factory content or unrelated home folders.
+	const QString kitsDir = confMgr->workingDir() + "kits";
+	QDir().mkpath(kitsDir);
+	sideBar->appendTab(new FileBrowser(FileBrowser::Type::Normal, kitsDir, FileItem::defaultFilters(),
+		tr("My Kits"), embed::getIconPixmap("instrument_track").transformed(QTransform().rotate(90)),
+		splitter, false, kitsDir, ""));
 
 	sideBar->appendTab(new FileBrowser(FileBrowser::Type::Normal,
 		confMgr->userPresetsDir() + "*" + confMgr->factoryPresetsDir(), "*.xpf *.cs.xml *.xiz *.lv2", tr("My Presets"),
@@ -758,7 +767,7 @@ void MainWindow::openProject()
 {
 	if( mayChangeProject(false) )
 	{
-		FileDialog ofd( this, tr( "Open Project" ), "", tr( "LMMS (*.mmp *.mmpz)" ) );
+		FileDialog ofd( this, tr( "Open Project" ), "", tr( "TEZ Studio (*.tez *.mmp *.mmpz)" ) );
 
 		ofd.setDirectory( ConfigManager::inst()->userProjectsDir() );
 		ofd.setFileMode( FileDialog::ExistingFiles );
@@ -802,7 +811,8 @@ bool MainWindow::saveProjectAs()
 {
 	auto optionsWidget = new SaveOptionsWidget(Engine::getSong()->getSaveOptions());
 	VersionedSaveDialog sfd( this, optionsWidget, tr( "Save Project" ), "",
-			tr( "LMMS Project" ) + " (*.mmpz *.mmp);;" +
+			tr( "TEZ Studio Project" ) + " (*.tez);;" +
+				tr( "LMMS Project" ) + " (*.mmpz *.mmp);;" +
 				tr( "LMMS Project Template" ) + " (*.mpt)" );
 	QString f = Engine::getSong()->projectFileName();
 	if( f != "" )
@@ -816,10 +826,8 @@ bool MainWindow::saveProjectAs()
 	}
 
 	// Don't write over file with suffix if no suffix is provided.
-	QString suffix = ConfigManager::inst()->value( "app",
-							"nommpz" ).toInt() == 0
-						? "mmpz"
-						: "mmp" ;
+	// New projects default to the TEZ Studio (.tez) format.
+	QString suffix = "tez";
 	sfd.setDefaultSuffix( suffix );
 
 	if( sfd.exec () == FileDialog::Accepted &&
