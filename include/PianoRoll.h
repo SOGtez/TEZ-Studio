@@ -450,6 +450,7 @@ private:
 	int m_startKey; // first key when drawing
 	int m_startKeyPixelOffset = 0; // sub-key vertical scroll offset, for smooth scrolling
 	int m_lastKey;
+	bool m_clickedExistingNote = false; // for "copy length" on a click (not a drag)
 
 	EditMode m_editMode;
 	EditMode m_ctrlMode; // mode they were in before they hit ctrl

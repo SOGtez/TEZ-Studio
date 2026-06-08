@@ -186,7 +186,7 @@ PianoRoll::PianoRoll() :
 	m_whiteKeySmallHeight(qFloor(m_keyLineHeight * 1.5)),
 	m_whiteKeyBigHeight(m_keyLineHeight * 2),
 	m_blackKeyHeight(m_keyLineHeight),
-	m_lenOfNewNotes( TimePos( 0, DefaultTicksPerBar/4 ) ),
+	m_lenOfNewNotes( TimePos( 0, DefaultTicksPerBar/2 ) ), // half note: easier to grab/resize
 	m_lastNoteVolume( DefaultVolume ),
 	m_lastNotePanning( DefaultPanning ),
 	m_minResizeLen( 0 ),
@@ -344,7 +344,7 @@ PianoRoll::PianoRoll() :
 	for (auto q : Quantizations) {
 		m_quantizeModel.addItem(QString("1/%1").arg(q));
 	}
-	m_quantizeModel.setInitValue(ConfigManager::inst()->value("ui", "pianorollquantization", QString::number(m_zoomingModel.findText("1/16"))).toInt());
+	m_quantizeModel.setInitValue(ConfigManager::inst()->value("ui", "pianorollquantization", QString::number(m_quantizeModel.findText("1/16"))).toInt());
 
 	connect( &m_quantizeModel, SIGNAL(dataChanged()),
 					this, SLOT(quantizeChanged()));
@@ -436,7 +436,9 @@ PianoRoll::PianoRoll() :
 	// Set up snap model
 	m_snapModel.addItem(tr("Nudge"));
 	m_snapModel.addItem(tr("Snap"));
-	m_snapModel.setInitValue(ConfigManager::inst()->value("ui", "pianorollsnap", "0").toInt());
+	// Default to "Snap" (index 1): notes snap to absolute grid lines like FL Studio.
+	// "Nudge" (0) only quantizes the drag amount, keeping a note's off-grid offset.
+	m_snapModel.setInitValue(ConfigManager::inst()->value("ui", "pianorollsnap", "1").toInt());
 	changeSnapMode();
 	connect(&m_snapModel, SIGNAL(dataChanged()),
 		this, SLOT(changeSnapMode()));
@@ -991,6 +993,13 @@ void PianoRoll::drawNoteRect( QPainter & p, int x, int y,
 				int width, const Note * n, const QColor & noteCol, const QColor & noteTextColor,
 				const QColor & selCol, const int noteOpc, const bool borders, bool drawNoteName )
 {
+	// Clip the note to the key area so it slides cleanly under the top and bottom edges
+	// instead of bleeding into the timeline above or the note-edit area below (the latter
+	// made notes vanish abruptly at the bottom edge). (`width` shadows QWidget::width().)
+	p.save();
+	p.setClipRect(QRect(m_whiteKeyWidth, keyAreaTop(),
+		this->width() - m_whiteKeyWidth, keyAreaBottom() - keyAreaTop()), Qt::IntersectClip);
+
 	++x;
 	++y;
 	width -= 2;
@@ -1092,6 +1101,8 @@ void PianoRoll::drawNoteRect( QPainter & p, int x, int y,
 		const int endmarkWidth = 3 - borderWidth;
 		p.drawRect( x + noteWidth - endmarkWidth, y, endmarkWidth, noteHeight );
 	}
+
+	p.restore();
 }
 
 
@@ -1893,6 +1904,9 @@ void PianoRoll::mousePressEvent(QMouseEvent * me )
 				m_lastNotePanning = current_note->getPanning();
 				m_lastNoteVolume = current_note->getVolume();
 				m_lenOfNewNotes = current_note->length();
+				// Only an existing note (not a freshly created one) is eligible for the
+				// "copy length on click" behaviour applied on mouse release.
+				m_clickedExistingNote = !is_new_note;
 
 				// remember which key and tick we started with
 				m_mouseDownKey = m_startKey;
@@ -1964,15 +1978,6 @@ void PianoRoll::mousePressEvent(QMouseEvent * me )
 
 					// otherwise move it
 					m_action = Action::MoveNote;
-
-					// Clicking (not resizing) an existing note makes the next drawn
-					// note inherit its length (FL "copy note" behaviour). Resizing goes
-					// through the ResizeNote branch above, so the chosen note-length
-					// picker is left untouched there.
-					if (!is_new_note)
-					{
-						m_noteLenModel.setValue(0);
-					}
 
 					// set move-cursor
 					setCursor( Qt::SizeAllCursor );
@@ -2407,6 +2412,17 @@ void PianoRoll::mouseReleaseEvent( QMouseEvent * me )
 			// time in the note-array of clip
 			m_midiClip->rearrangeAllNotes();
 
+			// If an existing note was clicked but NOT actually moved, treat it as a
+			// "copy length" click: switch to "Last note" and make the next drawn note
+			// inherit this note's length (FL behaviour). A real drag is excluded, so a
+			// note length you set in the toolbar still sticks when moving notes around.
+			if (m_clickedExistingNote && m_currentNote
+				&& m_currentNote->pos() == m_currentNote->oldPos()
+				&& m_currentNote->key() == m_currentNote->oldKey())
+			{
+				m_lenOfNewNotes = m_currentNote->length();
+				m_noteLenModel.setValue(0);
+			}
 		}
 		else if (m_action == Action::Strum || m_strumEnabled)
 		{
@@ -3371,6 +3387,14 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 
 	if (hasValidMidiClip())
 	{
+		// Keep the note-edit (velocity) area at the height the user set (default 100),
+		// so it stays a consistent, visible size and doesn't get stuck small. The min/max
+		// branches below still override it for extreme window sizes. (Unless the user is
+		// actively dragging the note-edit-area resize bar.)
+		if (m_action != Action::ResizeNoteEditArea)
+		{
+			m_notesEditHeight = m_userSetNotesEditHeight;
+		}
 		int pianoAreaHeight = keyAreaBottom() - keyAreaTop();
 		m_pianoKeysVisible = pianoAreaHeight / m_keyLineHeight;
 		int partialKeyVisible = pianoAreaHeight % m_keyLineHeight;
@@ -3400,23 +3424,11 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 		}
 		int topKey = std::clamp(m_startKey + m_pianoKeysVisible - 1, 0, NumKeys - 1);
 		int topNote = topKey % KeysPerOctave;
-		// if not resizing the note edit area, we can change m_notesEditHeight
-		if (m_action != Action::ResizeNoteEditArea && partialKeyVisible != 0)
-		{
-			// calculate the height change adding and subtracting the partial key
-			int noteAreaPlus = (m_notesEditHeight + partialKeyVisible) - m_userSetNotesEditHeight;
-			int noteAreaMinus = m_userSetNotesEditHeight - (m_notesEditHeight - partialKeyVisible);
-			// if adding the partial key to height is more distant from the set height
-			// we want to subtract the partial key
-			if (noteAreaPlus > noteAreaMinus)
-			{
-				m_notesEditHeight -= partialKeyVisible;
-				// since we're adding a partial key, we add one to the number visible
-				m_pianoKeysVisible += 1;
-			}
-			// otherwise we add height
-			else { m_notesEditHeight += partialKeyVisible; }
-		}
+		// With smooth (sub-key) vertical scrolling, a partial key at the bottom edge is
+		// expected and drawn via m_startKeyPixelOffset. We no longer absorb the partial
+		// key into the note-edit-area height: doing so re-toggled m_pianoKeysVisible and
+		// m_notesEditHeight every frame, making the notes jitter while resizing.
+		(void)partialKeyVisible;
 		int x, q = quantization(), tick;
 
 		// draw vertical quantization lines
@@ -3566,20 +3578,20 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 			else { p.setPen(m_lineColor); }
 			p.drawLine(m_whiteKeyWidth, y, width(), y);
 		};
-		// correct y offset of the top key
+		// Always draw one extra key above the top, regardless of its type. This both
+		// draws the white key behind a black top key AND fills the partial top key
+		// revealed by the smooth-scroll offset (clipped at keyAreaTop).
 		switch (prKeyOrder[topNote])
 		{
 		case KeyType::WhiteSmall:
 		case KeyType::WhiteBig:
-			break;
 		case KeyType::Black:
-			// draw extra white key
 			drawKey(topKey + 1, grid_line_y - m_keyLineHeight);
 		}
-		// loop through visible keys. Draw one extra key past the bottom so the
-		// partial key revealed by smooth scrolling is filled in (drawKey/lines guard
-		// against out-of-range indices).
-		const int lastKey = qMax(-1, topKey - m_pianoKeysVisible - 1);
+		// loop through visible keys. Draw two extra keys past the bottom so the
+		// partial key revealed by the smooth-scroll offset is always filled in, no
+		// matter the offset (drawKey/lines guard against out-of-range indices).
+		const int lastKey = qMax(-1, topKey - m_pianoKeysVisible - 2);
 		for (int key = topKey; key > lastKey; --key)
 		{
 			bool whiteKey = Piano::isWhiteKey(key);
@@ -3709,7 +3721,9 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 		qSwap<int>( sel_key_start, sel_key_end );
 	}
 
-	int y_base = keyAreaBottom() - 1 - m_startKeyPixelOffset;
+	// Aligned bottom (excludes any partial key at the very bottom) so the selection and
+	// knife use the same top-anchored key<->pixel mapping as yCoordOfKey()/the keyboard.
+	int y_base = m_pianoKeysVisible * m_keyLineHeight + keyAreaTop() - 1 - m_startKeyPixelOffset;
 	if( hasValidMidiClip() )
 	{
 		p.setClipRect(
@@ -3719,7 +3733,6 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 			height() - PR_TOP_MARGIN);
 
 		const int topKey = qBound(0, m_startKey + m_pianoKeysVisible - 1, NumKeys - 1);
-		const int bottomKey = topKey - m_pianoKeysVisible;
 
 		QPolygonF editHandles;
 
@@ -3757,7 +3770,7 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 				}
 
 				// is the note in visible area?
-				if (note->key() > bottomKey && note->key() <= topKey)
+				if (noteYPos(note->key()) < keyAreaBottom() && noteYPos(note->key()) + m_keyLineHeight > keyAreaTop())
 				{
 
 					// we've done and checked all, let's draw the note
@@ -3801,7 +3814,7 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 			}
 
 			// is the note in visible area?
-			if (note->key() > bottomKey && note->key() <= topKey)
+			if (noteYPos(note->key()) < keyAreaBottom() && noteYPos(note->key()) + m_keyLineHeight > keyAreaTop())
 			{
 				// We've done and checked all, let's draw the note with
 				// the appropriate color
@@ -3919,7 +3932,7 @@ void PianoRoll::paintEvent(QPaintEvent * pe )
 			}
 
 			// is the note in visible area?
-			if (note->key() > bottomKey && note->key() <= topKey)
+			if (noteYPos(note->key()) < keyAreaBottom() && noteYPos(note->key()) + m_keyLineHeight > keyAreaTop())
 			{
 
 				// we've done and checked all, let's draw the note
@@ -4060,13 +4073,37 @@ void PianoRoll::updateScrollbars()
 		m_startKeyPixelOffset = 0;
 	}
 	m_startKeyPixelOffset = qBound(0, m_startKeyPixelOffset, qMax(0, m_keyLineHeight - 1));
+	// Set the value without re-triggering verScrolled: m_startKey/offset are already
+	// authoritative here, so the feedback would only cause jitter (e.g. on resize).
+	m_topBottomScroll->blockSignals(true);
 	m_topBottomScroll->setValue((m_totalKeysToScroll - m_startKey) * m_keyLineHeight + m_startKeyPixelOffset);
+	m_topBottomScroll->blockSignals(false);
 }
 
 // responsible for moving/resizing scrollbars after window-resizing
 void PianoRoll::resizeEvent(QResizeEvent* re)
 {
 	updatePositionLineHeight();
+
+	// Use the same note-edit-area height that paintEvent will use, so keyAreaBottom()
+	// (and therefore the visible-key count computed below) is consistent with what gets
+	// drawn. Otherwise edge notes/keys fall outside the drawn range and vanish on resize.
+	if (m_action != Action::ResizeNoteEditArea)
+	{
+		m_notesEditHeight = m_userSetNotesEditHeight;
+	}
+
+	// Keep the top visible key fixed across the resize, so growing/shrinking the window
+	// reveals or hides keys at the bottom smoothly instead of snapping the whole view by
+	// a key each time the visible-key count changes. (Skip before the first paint, when
+	// m_pianoKeysVisible isn't known yet.)
+	if (m_pianoKeysVisible > 0 && m_keyLineHeight > 0)
+	{
+		const int prevTopKey = m_startKey + m_pianoKeysVisible - 1;
+		const int newVisible = std::max(1, (keyAreaBottom() - keyAreaTop()) / m_keyLineHeight);
+		m_startKey = qBound(0, prevTopKey - newVisible + 1, qMax(0, NumKeys - newVisible));
+	}
+
 	updateScrollbars();
 	m_timeLine->setFixedWidth(width());
 	update();
@@ -4341,27 +4378,28 @@ void PianoRoll::focusInEvent( QFocusEvent * ev )
 
 int PianoRoll::getKey(const int y) const
 {
-	// Since keys are numbered from the bottom up, we must get the cursor's
-	// distance from the bottom of the editor, as if the bottom pixel was number 0.
-	// keyAreaBottom() is the first row BELOW the editor, therefore we subtract 1.
-	const int distanceFromBottom = keyAreaBottom() - 1 - y - m_startKeyPixelOffset;
-	// As we divide the distance by keyLineHeight, we want to floor() the result,
-	// which is exactly what integer division does, but only for POSITIVE numbers.
-	// Therefore we calculate the distance from absolute 0 (to ensure it is positive)
-	// before dividing.
-	const int fromAbsoluteBottom = m_startKey * m_keyLineHeight + distanceFromBottom;
-	return std::clamp(fromAbsoluteBottom / m_keyLineHeight, 0, NumKeys - 1);
+	// Inverse of the top-anchored yCoordOfKey(): measure how many whole key rows the
+	// cursor is below the top key, then subtract from topKey. Uses floor division so a
+	// click anywhere inside a key row maps to that key (handles the partial top key,
+	// where the distance can be slightly negative).
+	const int topKey = m_startKey + m_pianoKeysVisible - 1;
+	const int dist = y - (keyAreaTop() - 1 - m_startKeyPixelOffset);
+	const int rows = (dist >= 0)
+		? dist / m_keyLineHeight
+		: -(((-dist) + m_keyLineHeight - 1) / m_keyLineHeight);
+	return std::clamp(topKey - rows, 0, NumKeys - 1);
 }
 
 
 
 int PianoRoll::yCoordOfKey(const int key) const
 {
-	// m_startKey is the bottomost visible key and keyAreaBottom() is the first pixel BELOW the editor.
-	// Count number of keys from bottom, multiply by key height, and add one key height
-	// since we want to return the TOP pixel of given key.
-	// m_startKeyPixelOffset shifts everything up by the sub-key smooth-scroll amount.
-	return keyAreaBottom() - ((key - m_startKey + 1) * m_keyLineHeight) - m_startKeyPixelOffset;
+	// Top-anchored to exactly match how the keyboard and notes are drawn (from
+	// keyAreaTop() using topKey). This stays correct even when the key area is not an
+	// exact multiple of the key height (a partial key at the bottom), so the hover
+	// highlight, semitone markers and note placement always line up with the keys.
+	const int topKey = m_startKey + m_pianoKeysVisible - 1;
+	return (topKey - key) * m_keyLineHeight + keyAreaTop() - 1 - m_startKeyPixelOffset;
 }
 
 
@@ -4778,7 +4816,10 @@ void PianoRoll::updateYScroll()
 		m_startKeyPixelOffset = 0;
 	}
 	m_startKeyPixelOffset = qBound(0, m_startKeyPixelOffset, qMax(0, m_keyLineHeight - 1));
+	// Avoid the verScrolled feedback loop (jitter) for this programmatic update.
+	m_topBottomScroll->blockSignals(true);
 	m_topBottomScroll->setValue((m_totalKeysToScroll - m_startKey) * m_keyLineHeight + m_startKeyPixelOffset);
+	m_topBottomScroll->blockSignals(false);
 }
 
 

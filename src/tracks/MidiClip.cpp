@@ -149,6 +149,29 @@ void MidiClip::updateLength()
 		setStartTimeOffset(TimePos(0));
 		updatePatternTrack();
 	}
+	else if (m_instrumentTrack->trackContainer()->type() != TrackContainer::Type::Pattern)
+	{
+		// Even when the clip has been manually resized (auto-resize off), never hide
+		// notes: grow it to contain the longest note so they still play (FL
+		// behaviour). Only grow, never shrink, so a manual length is otherwise kept.
+		tick_t max_length = 0;
+		for (const auto& note : m_notes)
+		{
+			if (note->length() > 0)
+			{
+				max_length = std::max<tick_t>(max_length, note->endPos());
+			}
+		}
+		if (max_length > 0)
+		{
+			const TimePos needed = TimePos(max_length).nextFullBar() * TimePos::ticksPerBar();
+			if (needed > length())
+			{
+				changeLength(needed);
+				updatePatternTrack();
+			}
+		}
+	}
 }
 
 
