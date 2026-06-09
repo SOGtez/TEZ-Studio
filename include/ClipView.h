@@ -40,6 +40,7 @@ namespace lmms
 {
 
 class DataFile;
+class Track;
 
 namespace gui
 {
@@ -206,6 +207,12 @@ private:
 	QPoint m_initialMousePos;
 	QPoint m_initialMouseGlobalPos;
 	QVector<TimePos> m_initialOffsets;
+
+	// For dragging a clip vertically onto a different (compatible) track. Updated
+	// while moving; the actual transfer happens on mouse release.
+	Track * m_targetTrackForMove = nullptr;
+	Track * trackUnderCursor( QMouseEvent * me );
+	void moveClipToTrack( Track * targetTrack );
 
 	TextFloat * m_hint;
 

@@ -48,6 +48,7 @@
 #include "SongEditor.h"
 #include "StringPairDrag.h"
 #include "TextFloat.h"
+#include "Track.h"
 #include "TrackContainer.h"
 #include "TrackContainerView.h"
 #include "TrackView.h"
@@ -847,10 +848,19 @@ void ClipView::mouseMoveEvent( QMouseEvent * me )
 		m_clip->movePosition(newPos);
 		newPos = m_clip->startPosition(); // Get the real position the Clip was dragged to for the label
 		m_trackView->getTrackContentWidget()->changePosition();
-		s_textFloat->setText( QString( "%1:%2" ).
+
+		// Detect whether the cursor is over a different, compatible track. If so, the
+		// clip will be moved there on release; show the target track name as feedback.
+		m_targetTrackForMove = trackUnderCursor( me );
+
+		QString posText = QString( "%1:%2" ).
 				arg( newPos.getBar() + 1 ).
-				arg( newPos.getTicks() %
-						TimePos::ticksPerBar() ) );
+				arg( newPos.getTicks() % TimePos::ticksPerBar() );
+		if( m_targetTrackForMove != nullptr )
+		{
+			posText += QStringLiteral( "  → " ) + m_targetTrackForMove->name();
+		}
+		s_textFloat->setText( posText );
 		s_textFloat->moveGlobal( this, QPoint( width() + 2, height() + 2 ) );
 	}
 	else if( m_action == Action::MoveSelection )
@@ -1031,8 +1041,18 @@ void ClipView::mouseReleaseEvent( QMouseEvent * me )
 	}
 	else if( m_action == Action::Move || m_action == Action::Resize || m_action == Action::ResizeLeft )
 	{
-		// TODO: Fix m_clip->setJournalling() consistency
-		m_clip->setJournalling( true );
+		if( m_action == Action::Move && m_targetTrackForMove != nullptr
+				&& m_targetTrackForMove != m_clip->getTrack() )
+		{
+			// Dropped over a different compatible track: transfer the clip there.
+			moveClipToTrack( m_targetTrackForMove );
+		}
+		else
+		{
+			// TODO: Fix m_clip->setJournalling() consistency
+			m_clip->setJournalling( true );
+		}
+		m_targetTrackForMove = nullptr;
 	}
 	else if( m_action == Action::Split )
 	{
@@ -1055,6 +1075,58 @@ void ClipView::mouseReleaseEvent( QMouseEvent * me )
 	s_textFloat->hide();
 	updateCursor(me);
 	selectableObject::mouseReleaseEvent( me );
+}
+
+
+
+
+/*! \brief Returns the Track under the mouse cursor if it is a *different* track of
+ *  the same type as this clip's track (a valid cross-track drop target), else nullptr.
+ */
+Track * ClipView::trackUnderCursor( QMouseEvent * me )
+{
+	auto tcv = m_trackView->trackContainerView();
+	const int yPos = tcv->contentWidget()->mapFromGlobal( mapToGlobal( position( me ) ) ).y();
+	const TrackView * tv = tcv->trackViewAt( yPos );
+	if( tv == nullptr ) { return nullptr; }
+
+	Track * target = const_cast<TrackView *>( tv )->getTrack();
+	Track * source = m_clip->getTrack();
+	if( target == nullptr || target == source || target->type() != source->type() )
+	{
+		return nullptr;
+	}
+	return target;
+}
+
+
+
+
+/*! \brief Move this clip onto targetTrack at its current (dragged) position by cloning
+ *  its full state onto a new clip there and deleting the original. Both tracks get an
+ *  undo checkpoint so the move can be undone.
+ */
+void ClipView::moveClipToTrack( Track * targetTrack )
+{
+	Track * sourceTrack = m_clip->getTrack();
+	const TimePos dropPos = m_clip->startPosition();
+
+	// Put the source clip back where it started so the source-track checkpoint
+	// (and therefore undo) reflects the pre-drag state.
+	m_clip->movePosition( m_initialClipPos );
+	sourceTrack->addJournalCheckPoint();
+	targetTrack->addJournalCheckPoint();
+
+	// Clone the clip's full state onto a new clip on the target track.
+	Clip * newClip = targetTrack->createClip( dropPos );
+	Clip::copyStateTo( m_clip, newClip );
+	newClip->movePosition( dropPos );
+
+	// Remove the original. The ClipView closes itself on the clip's destroyedClip().
+	sourceTrack->removeClip( m_clip );
+	m_clip->deleteLater();
+
+	Engine::getSong()->setModified();
 }
 
 
